@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fruitiers IA — Détection aérienne</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128;
+  --border:rgba(255,255,255,0.08);
+  --text:#e6edf3; --muted:#8b949e;
+  --green:#3fb950; --amber:#e3b341;
+  --blue:#58a6ff; --purple:#bc8cff;
+  --red:#f85149; --teal:#39d353;
+}
+
+body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+/* ── TOPBAR ── */
+#topbar {
+  display:flex; align-items:center; gap:12px;
+  padding:8px 16px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0; z-index:1000;
+}
+
+.logo-block { font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+.logo-block .tag {
+  font-size:10px; font-weight:500; letter-spacing:.06em;
+  background:linear-gradient(90deg,#58a6ff22,#bc8cff22);
+  border:1px solid #58a6ff44;
+  border-radius:10px; padding:2px 8px;
+  color:var(--blue);
+}
+
+.sep { width:1px; height:28px; background:var(--border); }
+
+/* ── ANALYSE BTN ── */
+#btn-analyse {
+  display:flex; align-items:center; gap:7px;
+  padding:8px 18px; border-radius:8px;
+  background:var(--blue); color:#0d1117;
+  border:none; font-size:13px; font-weight:600;
+  font-family:'DM Sans',sans-serif;
+  cursor:pointer; transition:all .15s;
+}
+#btn-analyse:hover { background:#79c0ff; }
+#btn-analyse:disabled { background:var(--surface2); color:var(--muted); cursor:not-allowed; }
+#btn-analyse .icon { font-size:16px; }
+
+/* Spinner */
+.spinner { width:14px; height:14px; border:2px solid rgba(13,17,23,.3); border-top-color:#0d1117; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ── ZOOM INDICATOR ── */
+#zoom-hint {
+  font-size:11px; color:var(--muted);
+  font-family:'DM Mono',monospace;
+  background:var(--surface2); border-radius:6px;
+  padding:4px 10px;
+}
+.map-btn {
+  font-size:11px; padding:4px 9px; border-radius:6px;
+  border:1px solid var(--border); background:transparent;
+  color:var(--muted); cursor:pointer; transition:all .15s;
+  font-family:'DM Sans',sans-serif;
+}
+.map-btn:hover,.map-btn.active { border-color:var(--blue); color:var(--blue); background:rgba(88,166,255,.1); }
+
+
+/* ── STATS ── */
+.stat-pill {
+  display:flex; align-items:center; gap:6px;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:16px; padding:4px 12px; font-size:12px;
+}
+.stat-pill strong { font-family:'DM Mono',monospace; }
+
+#stats-bar { margin-left:auto; display:flex; gap:8px; }
+
+/* ── API KEY BTN ── */
+#btn-settings {
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:8px; padding:6px 12px;
+  color:var(--muted); font-size:12px;
+  font-family:'DM Sans',sans-serif;
+  cursor:pointer; transition:all .15s;
+}
+#btn-settings:hover { border-color:var(--blue); color:var(--blue); }
+
+/* ── MAIN ── */
+#main { display:flex; flex:1; overflow:hidden; }
+#map { flex:1; }
+
+/* ── PANEL DROIT ── */
+#panel {
+  width:280px; background:var(--surface);
+  border-left:1px solid var(--border);
+  display:flex; flex-direction:column;
+  overflow:hidden; flex-shrink:0;
+}
+
+.panel-section { border-bottom:1px solid var(--border); padding:14px 16px; }
+.section-title { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-bottom:10px; }
+
+/* ── CANDIDATS LIST ── */
+#candidates-wrap { flex:1; overflow-y:auto; padding:0; }
+
+.candidate-card {
+  padding:12px 16px;
+  border-bottom:1px solid var(--border);
+  cursor:pointer; transition:background .1s;
+}
+.candidate-card:hover { background:var(--surface2); }
+.candidate-card.selected { background:rgba(88,166,255,.08); border-left:2px solid var(--blue); }
+
+.cand-header { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.cand-num {
+  width:20px; height:20px; border-radius:50%;
+  background:var(--blue); color:#0d1117;
+  font-size:10px; font-weight:700;
+  display:flex; align-items:center; justify-content:center;
+  flex-shrink:0;
+}
+.cand-num.haute { background:var(--green); }
+.cand-num.moyenne { background:var(--amber); }
+.cand-num.faible { background:var(--muted); }
+
+.cand-title { font-size:13px; font-weight:500; }
+.cand-meta { font-size:11px; color:var(--muted); margin-left:28px; }
+.cand-badge {
+  margin-left:auto; font-size:10px; font-family:'DM Mono',monospace;
+  padding:2px 6px; border-radius:6px;
+}
+.cand-badge.haute { background:rgba(63,185,80,.2); color:var(--green); }
+.cand-badge.moyenne { background:rgba(227,179,65,.2); color:var(--amber); }
+.cand-badge.faible { background:rgba(139,148,158,.15); color:var(--muted); }
+
+/* Validation btns */
+.valid-row {
+  display:flex; gap:6px; margin-top:8px; margin-left:28px;
+}
+.v-btn {
+  flex:1; padding:5px 0; border-radius:6px;
+  border:1px solid var(--border); background:transparent;
+  font-size:11px; font-family:'DM Sans',sans-serif;
+  cursor:pointer; transition:all .15s; color:var(--muted);
+}
+.v-btn:hover.confirm { border-color:var(--green); color:var(--green); background:rgba(63,185,80,.08); }
+.v-btn:hover.reject  { border-color:var(--red);   color:var(--red);   background:rgba(248,81,73,.08); }
+.v-btn.confirmed { border-color:var(--green); color:var(--green); background:rgba(63,185,80,.15); }
+.v-btn.rejected  { border-color:var(--red);   color:var(--red);   background:rgba(248,81,73,.15); }
+
+/* ── ANALYSE LOG ── */
+#analyse-log {
+  padding:14px 16px;
+  font-size:12px; font-family:'DM Mono',monospace;
+  color:var(--muted); line-height:1.8;
+  border-bottom:1px solid var(--border);
+  min-height:80px;
+}
+.log-ok  { color:var(--green); }
+.log-err { color:var(--red); }
+.log-run { color:var(--blue); }
+
+/* ── EMPTY STATE ── */
+#empty-state {
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  gap:10px; padding:24px; text-align:center;
+}
+#empty-state .icon { font-size:36px; opacity:.4; }
+#empty-state p { font-size:13px; color:var(--muted); line-height:1.6; }
+
+/* ── MODAL API KEY ── */
+#modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.7);
+  display:none; align-items:center; justify-content:center;
+  z-index:9999;
+}
+#modal-overlay.show { display:flex; }
+#modal {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:24px; width:380px;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);
+}
+#modal h2 { font-size:15px; margin-bottom:6px; }
+#modal p { font-size:12px; color:var(--muted); margin-bottom:16px; line-height:1.6; }
+#modal input {
+  width:100%; padding:8px 12px;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:8px; color:var(--text);
+  font-size:13px; font-family:'DM Mono',monospace;
+  outline:none; transition:border .15s;
+}
+#modal input:focus { border-color:var(--blue); }
+.modal-actions { display:flex; gap:8px; margin-top:14px; }
+.modal-btn {
+  flex:1; padding:9px; border-radius:8px; border:none;
+  font-size:13px; font-family:'DM Sans',sans-serif;
+  font-weight:600; cursor:pointer;
+}
+.modal-btn.primary { background:var(--blue); color:#0d1117; }
+.modal-btn.secondary { background:var(--surface2); color:var(--muted); }
+
+/* ── ZONE PREVIEW ── */
+#zone-rect { position:absolute; border:2px dashed var(--blue); background:rgba(88,166,255,.08); pointer-events:none; display:none; z-index:500; }
+
+/* ── EXPORT ── */
+.panel-footer { padding:12px 16px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:6px; }
+.exp-btn {
+  padding:7px 12px; border-radius:8px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text); font-size:12px;
+  font-family:'DM Sans',sans-serif; cursor:pointer; transition:all .15s; text-align:left;
+}
+.exp-btn:hover { border-color:var(--blue); color:var(--blue); }
+.exp-btn.primary { background:var(--blue); color:#0d1117; border-color:var(--blue); font-weight:600; }
+.exp-btn.primary:hover { background:#79c0ff; }
+
+/* ── TOAST ── */
+#toast {
+  position:fixed; bottom:20px; left:50%;
+  transform:translateX(-50%) translateY(60px);
+  background:var(--surface); border:1px solid var(--green);
+  color:var(--text); padding:10px 20px; border-radius:20px;
+  font-size:12px; transition:transform .3s; z-index:9999;
+  pointer-events:none; white-space:nowrap;
+}
+#toast.show { transform:translateX(-50%) translateY(0); }
+
+/* Leaflet popup */
+.leaflet-popup-content-wrapper {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; color:var(--text);
+  font-family:'DM Sans',sans-serif;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+.leaflet-popup-tip { background:var(--surface); }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <div class="logo-block">
+    🌳 Fruitiers IA
+    <span class="tag">Vision Claude</span>
+  </div>
+  <div class="sep"></div>
+
+  <button id="btn-analyse" onclick="lancerAnalyse()">
+    <span class="icon">🔍</span> Analyser cette vue
+  </button>
+
+  <div id="zoom-hint" class="warn">Zoom ≥ 17 recommandé</div>
+
+  <div id="stats-bar">
+    <div class="stat-pill">
+      <span>🎯</span>
+      <strong id="cnt-candidats">0</strong>
+      <span>candidats</span>
+    </div>
+    <div class="stat-pill">
+      <span>✅</span>
+      <strong id="cnt-valides">0</strong>
+      <span>validés</span>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:4px">
+    <button class="map-btn active" data-bm="esri" onclick="switchBase(this)">🛰 Satellite</button>
+    <button class="map-btn" data-bm="ign" onclick="switchBase(this)">📷 IGN</button>
+    <button class="map-btn" data-bm="osm" onclick="switchBase(this)">🗺 OSM</button>
+  </div>
+  <button id="btn-settings" onclick="openModal()">⚙ Clé API</button>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="map"></div>
+
+  <!-- PANEL DROIT -->
+  <div id="panel">
+
+    <!-- LOG -->
+    <div class="panel-section" style="padding:0">
+      <div id="analyse-log">
+        <span class="log-run">→</span> En attente d'une analyse…<br>
+        Zoome sur une zone, puis clique "Analyser cette vue".
+      </div>
+    </div>
+
+    <!-- LISTE CANDIDATS -->
+    <div id="candidates-wrap">
+      <div id="empty-state">
+        <div class="icon">🛰</div>
+        <p>Lance une analyse sur la photo aérienne IGN.<br>L'IA détectera les couronnes de fruitiers candidats.</p>
+      </div>
+      <div id="candidates-list" style="display:none"></div>
+    </div>
+
+    <!-- FOOTER EXPORT -->
+    <div class="panel-footer">
+      <button class="exp-btn primary" onclick="exportValides()">⬇ Exporter les validés (GeoJSON)</button>
+      <button class="exp-btn" onclick="exportTous()">📋 Tous les candidats</button>
+      <button class="exp-btn" onclick="copyFirebase()">🔥 Copier format Firebase</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL API KEY -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h2>🔑 Clé API Anthropic</h2>
+    <p>Pour utiliser la détection IA, tu as besoin d'une clé API Anthropic.<br>
+    Elle est stockée localement dans ton navigateur, jamais envoyée ailleurs.</p>
+    <input type="password" id="api-key-input" placeholder="sk-ant-api03-…" autocomplete="off"/>
+    <div class="modal-actions">
+      <button class="modal-btn secondary" onclick="closeModal()">Annuler</button>
+      <button class="modal-btn primary" onclick="saveKey()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// MAP
+// ═══════════════════════════════════════════════════
+const map = L.map('map', { center:[47.218,-1.553], zoom:15 });
+
+const baseLayers = {
+  esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution:'© Esri World Imagery', maxZoom:19
+  }),
+  ign: L.tileLayer(
+    'https://data.geopf.fr/wmts?REQUEST=GetTile&SERVICE=WMTS&VERSION=1.0.0&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+    { attribution:'© IGN Géoportail', maxZoom:20, maxNativeZoom:19 }
+  ),
+  osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'© OpenStreetMap', maxZoom:19
+  })
+};
+baseLayers.esri.addTo(map);
+
+// Zoom indicator
+map.on('zoomend moveend', updateZoomHint);
+function updateZoomHint() {
+  const z = map.getZoom();
+  const el = document.getElementById('zoom-hint');
+  if (z >= 17) { el.textContent = `Zoom ${z} — résolution idéale ✓`; el.className = 'zoom-hint ok'; }
+  else if (z >= 15) { el.textContent = `Zoom ${z} — agrandis un peu`; el.className = 'zoom-hint warn'; }
+  else { el.textContent = `Zoom ${z} — zoom insuffisant`; el.className = 'zoom-hint warn'; }
+}
+updateZoomHint();
+
+// Layer candidates
+const lyrCandidats = L.layerGroup().addTo(map);
+
+// ═══════════════════════════════════════════════════
+// ÉTAT
+// ═══════════════════════════════════════════════════
+let candidats = [];        // { lat, lon, espece, confiance, contexte, notes, etat }
+let analyseCount = 0;
+let currentBounds = null;
+
+// ═══════════════════════════════════════════════════
+// API KEY
+// ═══════════════════════════════════════════════════
+function getKey() { return localStorage.getItem('anthropic_key') || ''; }
+function openModal() {
+  document.getElementById('api-key-input').value = getKey();
+  document.getElementById('modal-overlay').classList.add('show');
+}
+function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+function saveKey() {
+  const k = document.getElementById('api-key-input').value.trim();
+  if (!k) { toast('Clé vide !'); return; }
+  localStorage.setItem('anthropic_key', k);
+  closeModal(); toast('Clé API enregistrée ✓');
+}
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+// ═══════════════════════════════════════════════════
+// LOG
+// ═══════════════════════════════════════════════════
+function log(msg, type='run') {
+  const el = document.getElementById('analyse-log');
+  const symbols = { run:'→', ok:'✓', err:'✗' };
+  const s = symbols[type] || '→';
+  el.innerHTML += `<span class="log-${type}">${s}</span> ${msg}<br>`;
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog() { document.getElementById('analyse-log').innerHTML = ''; }
+
+// ═══════════════════════════════════════════════════
+// CAPTURE IMAGE VIA WMS IGN
+// ═══════════════════════════════════════════════════
+async function captureIGNImage(bounds) {
+  const s = bounds.getSouth(), n = bounds.getNorth();
+  const w = bounds.getWest(), e = bounds.getEast();
+
+  // WMS GetMap — EPSG:4326, bbox = minLat,minLon,maxLat,maxLon pour 1.3.0
+  const wmsUrl = `https://data.geopf.fr/wms-r?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0` +
+    `&LAYERS=ORTHOIMAGERY.ORTHOPHOTOS&STYLES=&FORMAT=image/png` +
+    `&CRS=EPSG:4326&BBOX=${s},${w},${n},${e}` +
+    `&WIDTH=1024&HEIGHT=1024&EXCEPTIONS=INIMAGE`;
+
+  log(`Appel WMS IGN — zone ${(e-w).toFixed(4)}°×${(n-s).toFixed(4)}°`, 'run');
+
+  const resp = await fetch(wmsUrl);
+  if (!resp.ok) throw new Error(`WMS HTTP ${resp.status}`);
+  const blob = await resp.blob();
+  if (!blob.type.includes('image')) throw new Error('Réponse WMS non-image : ' + blob.type);
+
+  // Blob → base64
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => res(reader.result.split(',')[1]);
+    reader.onerror = rej;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// PROMPT VISION
+// ═══════════════════════════════════════════════════
+const VISION_PROMPT = `Tu es un expert en télédétection et en arboriculture fruitière. Analyse cette photo aérienne IGN (résolution ~20-50 cm/pixel) d'une zone de Nantes, France.
+
+MISSION : Identifier tous les arbres fruitiers potentiels visibles.
+
+Indices visuels d'un fruitier :
+- Couronne arrondie, dense, isolée dans un jardin ou verger
+- Diamètre de couronne 3 à 10 mètres
+- Texture de feuillage plus fine que grands arbres ornementaux
+- Souvent en rangées dans vergers, ou solitaires dans jardins
+- Couleur vert profond ou légèrement gris-vert
+- Ombre projetée caractéristique arrondie
+
+Pour chaque candidat trouvé, donne :
+- x_rel : position X relative dans l'image, de 0.0 (gauche) à 1.0 (droite)
+- y_rel : position Y relative dans l'image, de 0.0 (haut) à 1.0 (bas)
+- confiance : "haute" | "moyenne" | "faible"
+- contexte : "jardin_prive" | "verger" | "parc" | "bord_voie" | "terrain_vague"
+- espece_probable : genre botanique si devinable ("Prunus", "Malus", "Pyrus", "Ficus", "Juglans") ou "indéterminé"
+- notes : observation courte (≤60 caractères)
+
+RÉPONDS UNIQUEMENT en JSON valide, sans texte avant ni après :
+{"candidats":[{"x_rel":0.3,"y_rel":0.6,"confiance":"haute","contexte":"jardin_prive","espece_probable":"Malus","notes":"couronne ronde isolée"}],"contexte_global":"description de la zone en 1 phrase","nb_arbres_total":12}
+
+Si vraiment aucun fruitier : {"candidats":[],"contexte_global":"zone sans fruitiers","nb_arbres_total":0}`;
+
+// ═══════════════════════════════════════════════════
+// APPEL CLAUDE VISION
+// ═══════════════════════════════════════════════════
+async function callVision(base64img) {
+  const key = getKey();
+  if (!key) throw new Error('Clé API manquante — clique sur ⚙ Clé API');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type:'image', source:{ type:'base64', media_type:'image/png', data:base64img } },
+          { type:'text', text:VISION_PROMPT }
+        ]
+      }]
+    })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({}));
+    throw new Error(err.error?.message || `API ${res.status}`);
+  }
+
+  const data = await res.json();
+  const text = data.content?.[0]?.text || '';
+  const clean = text.replace(/```json|```/g, '').trim();
+
+  let parsed;
+  try { parsed = JSON.parse(clean); }
+  catch(e) {
+    // Essaie d'extraire le JSON
+    const match = clean.match(/\{[\s\S]+\}/);
+    if (match) parsed = JSON.parse(match[0]);
+    else throw new Error('Réponse JSON non parseable');
+  }
+  return parsed;
+}
+
+// ═══════════════════════════════════════════════════
+// CONVERSION RELATIF → GPS
+// ═══════════════════════════════════════════════════
+function relToLatLon(bounds, xRel, yRel) {
+  const n = bounds.getNorth(), s = bounds.getSouth();
+  const w = bounds.getWest(), e = bounds.getEast();
+  return {
+    lat: n - yRel * (n - s),
+    lon: w + xRel * (e - w)
+  };
+}
+
+// ═══════════════════════════════════════════════════
+// LANCER L'ANALYSE
+// ═══════════════════════════════════════════════════
+async function lancerAnalyse() {
+  const btn = document.getElementById('btn-analyse');
+  const zoom = map.getZoom();
+
+  if (zoom < 14) {
+    toast("⚠ Zoome davantage avant d'analyser");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Analyse en cours…';
+  clearLog();
+  log('Démarrage analyse — zoom ' + zoom, 'run');
+
+  currentBounds = map.getBounds();
+  analyseCount++;
+
+  try {
+    // 1. Capturer l'image WMS
+    log('Récupération photo aérienne IGN…', 'run');
+    const base64 = await captureIGNImage(currentBounds);
+    log('Image capturée (1024×1024 px)', 'ok');
+
+    // 2. Appel Claude Vision
+    log('Envoi à Claude Vision (claude-sonnet-4)…', 'run');
+    const result = await callVision(base64);
+    log(`Analyse complète — ${result.candidats?.length || 0} candidat(s) détecté(s)`, 'ok');
+
+    if (result.contexte_global) {
+      log(`Zone : ${result.contexte_global}`, 'run');
+    }
+
+    // 3. Ajouter les candidats
+    const nouveaux = (result.candidats || []).map((c, i) => {
+      const { lat, lon } = relToLatLon(currentBounds, c.x_rel, c.y_rel);
+      return {
+        id: `a${analyseCount}_${i}`,
+        lat, lon,
+        espece: c.espece_probable || 'indéterminé',
+        confiance: c.confiance || 'faible',
+        contexte: c.contexte || '',
+        notes: c.notes || '',
+        etat: 'en_attente',   // 'confirme' | 'rejete' | 'en_attente'
+        analyse: analyseCount
+      };
+    });
+
+    candidats.push(...nouveaux);
+    renderCandidats();
+    addMarkersMap(nouveaux);
+    updateStats();
+
+    if (nouveaux.length === 0) {
+      log('Aucun fruitier identifié dans cette zone.', 'run');
+    }
+
+  } catch(err) {
+    log(`Erreur : ${err.message}`, 'err');
+    toast('Erreur : ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="icon">🔍</span> Analyser cette vue';
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// MARQUEURS CARTE
+// ═══════════════════════════════════════════════════
+function colorConfiance(c) {
+  return c === 'haute' ? '#3fb950' : c === 'moyenne' ? '#e3b341' : '#8b949e';
+}
+
+const markerRefs = {};
+
+function addMarkersMap(list) {
+  list.forEach(c => {
+    const col = colorConfiance(c.confiance);
+    const m = L.circleMarker([c.lat, c.lon], {
+      radius: 10, fillColor: col, color:'#0d1117',
+      weight: 2, fillOpacity: 0.85
+    });
+    m.bindPopup(`
+      <div style="min-width:180px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:5px">🌳 ${c.espece}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:3px">
+          Confiance : <span style="color:${col};font-weight:600">${c.confiance}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">Contexte : ${c.contexte}</div>
+        ${c.notes ? `<div style="font-size:11px;margin-top:4px;font-style:italic">${c.notes}</div>` : ''}
+        <div style="margin-top:8px;display:flex;gap:6px">
+          <button onclick="validerCandidat('${c.id}','confirme')" style="flex:1;padding:4px;border-radius:5px;border:1px solid #3fb950;background:rgba(63,185,80,.15);color:#3fb950;font-size:11px;cursor:pointer">✓ Confirmer</button>
+          <button onclick="validerCandidat('${c.id}','rejete')"  style="flex:1;padding:4px;border-radius:5px;border:1px solid #f85149;background:rgba(248,81,73,.15);color:#f85149;font-size:11px;cursor:pointer">✗ Rejeter</button>
+        </div>
+      </div>
+    `, { maxWidth:220 });
+    m.addTo(lyrCandidats);
+    markerRefs[c.id] = m;
+  });
+}
+
+function updateMarkerColor(id) {
+  const c = candidats.find(x => x.id === id);
+  const m = markerRefs[id];
+  if (!m || !c) return;
+  const col = c.etat === 'confirme' ? '#3fb950'
+             : c.etat === 'rejete'  ? '#f85149'
+             : colorConfiance(c.confiance);
+  m.setStyle({ fillColor: col });
+}
+
+// ═══════════════════════════════════════════════════
+// RENDU LISTE CANDIDATS
+// ═══════════════════════════════════════════════════
+function renderCandidats() {
+  const empty = document.getElementById('empty-state');
+  const list = document.getElementById('candidates-list');
+
+  if (candidats.length === 0) {
+    empty.style.display = 'flex';
+    list.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  list.style.display = 'block';
+
+  list.innerHTML = candidats.map((c, i) => `
+    <div class="candidate-card" id="card-${c.id}" onclick="selectCandidat('${c.id}')">
+      <div class="cand-header">
+        <div class="cand-num ${c.confiance}">${i+1}</div>
+        <div class="cand-title">🌳 ${c.espece}</div>
+        <span class="cand-badge ${c.confiance}">${c.confiance}</span>
+      </div>
+      <div class="cand-meta">${c.contexte}${c.notes ? ' · ' + c.notes : ''}</div>
+      <div class="valid-row">
+        <button class="v-btn confirm ${c.etat==='confirme'?'confirmed':''}" onclick="event.stopPropagation();validerCandidat('${c.id}','confirme')">✓ Confirmer</button>
+        <button class="v-btn reject  ${c.etat==='rejete'?'rejected':''}"  onclick="event.stopPropagation();validerCandidat('${c.id}','rejete')">✗ Rejeter</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectCandidat(id) {
+  document.querySelectorAll('.candidate-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('card-'+id)?.classList.add('selected');
+  const c = candidats.find(x => x.id === id);
+  if (c) map.panTo([c.lat, c.lon]);
+  markerRefs[id]?.openPopup();
+}
+
+function validerCandidat(id, etat) {
+  const c = candidats.find(x => x.id === id);
+  if (!c) return;
+  c.etat = etat;
+  renderCandidats();
+  updateMarkerColor(id);
+  updateStats();
+  toast(etat === 'confirme' ? '✓ Fruitier confirmé !' : '✗ Candidat rejeté');
+}
+
+function updateStats() {
+  document.getElementById('cnt-candidats').textContent = candidats.length;
+  document.getElementById('cnt-valides').textContent = candidats.filter(c => c.etat==='confirme').length;
+}
+
+// ═══════════════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════════════
+function toGeoJSON(list) {
+  return {
+    type: 'FeatureCollection',
+    features: list.map(c => ({
+      type: 'Feature',
+      geometry: { type:'Point', coordinates:[c.lon, c.lat] },
+      properties: {
+        espece: c.espece, confiance: c.confiance,
+        contexte: c.contexte, notes: c.notes,
+        etat: c.etat, source: 'Claude Vision IA'
+      }
+    }))
+  };
+}
+
+function download(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename; a.click();
+}
+
+function exportValides() {
+  const v = candidats.filter(c => c.etat === 'confirme');
+  if (!v.length) { toast('Aucun candidat confirmé !'); return; }
+  download(toGeoJSON(v), `fruitiers_valides_ia_${new Date().toISOString().slice(0,10)}.geojson`);
+  toast(`${v.length} fruitier(s) exporté(s)`);
+}
+
+function exportTous() {
+  if (!candidats.length) { toast('Aucun candidat pour l\'instant'); return; }
+  download(toGeoJSON(candidats), `fruitiers_candidats_ia_${new Date().toISOString().slice(0,10)}.geojson`);
+  toast(`${candidats.length} candidat(s) exporté(s)`);
+}
+
+function copyFirebase() {
+  const valides = candidats.filter(c => c.etat === 'confirme');
+  if (!valides.length) { toast('Aucun confirmé à exporter'); return; }
+  const obj = {};
+  valides.forEach((c, i) => {
+    obj[`ia_${Date.now()}_${i}`] = {
+      lat: c.lat, lng: c.lon,
+      espece: c.espece,
+      source: 'IA Vision',
+      valide: false,
+      votes: 0,
+      confirme: false,
+      notes: c.notes,
+      timestamp: Date.now()
+    };
+  });
+  navigator.clipboard.writeText(JSON.stringify(obj, null, 2))
+    .then(() => toast(`${valides.length} entrées copiées pour Firebase !`))
+    .catch(() => toast('Copie manuelle requise'));
+}
+
+function switchBase(btn) {
+  document.querySelectorAll('.map-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  Object.values(baseLayers).forEach(l => map.removeLayer(l));
+  baseLayers[btn.dataset.bm].addTo(map);
+}
+
+// ── TOAST ──
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── CHECK CLE AU DEMARRAGE ──
+window.addEventListener('load', () => {
+  if (!getKey()) {
+    setTimeout(() => {
+      log('⚠ Clé API Anthropic requise — clique sur ⚙ Clé API', 'err');
+    }, 500);
+  } else {
+    log('Clé API détectée ✓ — Prêt à analyser.', 'ok');
+  }
+});
+</script>
+</body>
+</html>
